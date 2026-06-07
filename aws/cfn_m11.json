@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Flight Price Notifier M1.1 - save_subscription Lambda + HTTP API",
+  "Description": "Flight Price Notifier M1.1 - subscribe + list subscriptions (Lambda + HTTP API)",
   "Resources": {
     "Fn": {
       "Type": "AWS::Lambda::Function",
@@ -16,6 +16,20 @@
         }
       }
     },
+    "FnList": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "flight-list-subscriptions",
+        "Runtime": "python3.12",
+        "Handler": "index.handler",
+        "Timeout": 15,
+        "MemorySize": 128,
+        "Role": "arn:aws:iam::326786007037:role/flight-lambda-role",
+        "Code": {
+          "ZipFile": "import boto3, json\nfrom decimal import Decimal\nfrom boto3.dynamodb.conditions import Key\nT=boto3.resource(\"dynamodb\").Table(\"subscriptions\")\nH={\"Access-Control-Allow-Origin\":\"*\",\"Access-Control-Allow-Methods\":\"GET,OPTIONS\",\"Access-Control-Allow-Headers\":\"content-type\",\"Content-Type\":\"application/json\"}\ndef enc(o):\n    if isinstance(o,Decimal):return int(o) if o==o.to_integral_value() else float(o)\n    raise TypeError\ndef r(s,b):return {\"statusCode\":s,\"headers\":H,\"body\":json.dumps(b,default=enc)}\ndef handler(event,context):\n    m=(event.get(\"requestContext\",{}).get(\"http\",{}) or {}).get(\"method\")\n    if m==\"OPTIONS\":return r(200,{\"ok\":True})\n    q=event.get(\"queryStringParameters\") or {}\n    email=(q.get(\"email\") or \"\").strip().lower()\n    if not email or \"@\" not in email:return r(400,{\"error\":\"valid email is required\"})\n    res=T.query(KeyConditionExpression=Key(\"email\").eq(email))\n    return r(200,{\"ok\":True,\"subscriptions\":res.get(\"Items\",[])})\n"
+        }
+      }
+    },
     "Api": {
       "Type": "AWS::ApiGatewayV2::Api",
       "Properties": {
@@ -26,6 +40,7 @@
             "*"
           ],
           "AllowMethods": [
+            "GET",
             "POST",
             "OPTIONS"
           ],
@@ -52,6 +67,23 @@
         "PayloadFormatVersion": "2.0"
       }
     },
+    "IntegrationList": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Properties": {
+        "ApiId": {
+          "Ref": "Api"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "FnList",
+            "Arn"
+          ]
+        },
+        "IntegrationMethod": "POST",
+        "PayloadFormatVersion": "2.0"
+      }
+    },
     "Route": {
       "Type": "AWS::ApiGatewayV2::Route",
       "Properties": {
@@ -61,6 +93,18 @@
         "RouteKey": "POST /subscribe",
         "Target": {
           "Fn::Sub": "integrations/${Integration}"
+        }
+      }
+    },
+    "RouteList": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "Api"
+        },
+        "RouteKey": "GET /subscriptions",
+        "Target": {
+          "Fn::Sub": "integrations/${IntegrationList}"
         }
       }
     },
@@ -86,12 +130,30 @@
           "Fn::Sub": "arn:aws:execute-api:us-east-1:326786007037:${Api}/*/*/subscribe"
         }
       }
+    },
+    "PermList": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "FnList"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:execute-api:us-east-1:326786007037:${Api}/*/*/subscriptions"
+        }
+      }
     }
   },
   "Outputs": {
     "ApiEndpoint": {
       "Value": {
         "Fn::Sub": "https://${Api}.execute-api.us-east-1.amazonaws.com/subscribe"
+      }
+    },
+    "ListEndpoint": {
+      "Value": {
+        "Fn::Sub": "https://${Api}.execute-api.us-east-1.amazonaws.com/subscriptions"
       }
     },
     "ApiId": {
