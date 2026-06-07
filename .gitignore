@@ -30,3 +30,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# M1.1 local build artifacts
+/aws/build/
+/aws/*.zip
+/aws/create_stack_cmd.txt
+/dist/

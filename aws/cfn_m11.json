@@ -1,0 +1,103 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Flight Price Notifier M1.1 - save_subscription Lambda + HTTP API",
+  "Resources": {
+    "Fn": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "flight-save-subscription",
+        "Runtime": "python3.12",
+        "Handler": "index.handler",
+        "Timeout": 15,
+        "MemorySize": 128,
+        "Role": "arn:aws:iam::326786007037:role/flight-lambda-role",
+        "Code": {
+          "ZipFile": "import boto3, json, time\nfrom decimal import Decimal\nPLANS={\"tokyo\":{\"origin\":\"TPE\",\"destination\":\"TYO\"},\"seoul\":{\"origin\":\"TPE\",\"destination\":\"SEL\"}}\nT=boto3.resource(\"dynamodb\").Table(\"subscriptions\")\nH={\"Access-Control-Allow-Origin\":\"*\",\"Access-Control-Allow-Methods\":\"POST,OPTIONS\",\"Access-Control-Allow-Headers\":\"content-type\",\"Content-Type\":\"application/json\"}\ndef enc(o):\n    if isinstance(o,Decimal):return int(o) if o==o.to_integral_value() else float(o)\n    raise TypeError\ndef r(s,b):return {\"statusCode\":s,\"headers\":H,\"body\":json.dumps(b,default=enc)}\ndef handler(event,context):\n    m=(event.get(\"requestContext\",{}).get(\"http\",{}) or {}).get(\"method\")\n    if m==\"OPTIONS\":return r(200,{\"ok\":True})\n    raw=event.get(\"body\",event)\n    if isinstance(raw,str):\n        try:d=json.loads(raw)\n        except Exception:return r(400,{\"error\":\"invalid JSON body\"})\n    else:d=raw or {}\n    email=(d.get(\"email\") or \"\").strip().lower()\n    pn=(d.get(\"plan_name\") or \"\").strip().lower()\n    tp=d.get(\"target_price\")\n    if not email or \"@\" not in email:return r(400,{\"error\":\"valid email is required\"})\n    if pn not in PLANS:return r(400,{\"error\":\"plan_name must be tokyo or seoul\"})\n    try:tp=float(tp)\n    except Exception:return r(400,{\"error\":\"target_price must be a number (TWD)\"})\n    if tp<=0:return r(400,{\"error\":\"target_price must be positive\"})\n    p=PLANS[pn];route=\"%s-%s\"%(p[\"origin\"],p[\"destination\"]);now=int(time.time())\n    item={\"email\":email,\"route\":route,\"plan_name\":pn,\"origin\":p[\"origin\"],\"destination\":p[\"destination\"],\"target_price\":Decimal(str(tp)),\"currency\":\"TWD\",\"created_at\":now,\"updated_at\":now}\n    T.put_item(Item=item)\n    return r(200,{\"ok\":True,\"subscription\":item})\n"
+        }
+      }
+    },
+    "Api": {
+      "Type": "AWS::ApiGatewayV2::Api",
+      "Properties": {
+        "Name": "flight-api",
+        "ProtocolType": "HTTP",
+        "CorsConfiguration": {
+          "AllowOrigins": [
+            "*"
+          ],
+          "AllowMethods": [
+            "POST",
+            "OPTIONS"
+          ],
+          "AllowHeaders": [
+            "content-type"
+          ]
+        }
+      }
+    },
+    "Integration": {
+      "Type": "AWS::ApiGatewayV2::Integration",
+      "Properties": {
+        "ApiId": {
+          "Ref": "Api"
+        },
+        "IntegrationType": "AWS_PROXY",
+        "IntegrationUri": {
+          "Fn::GetAtt": [
+            "Fn",
+            "Arn"
+          ]
+        },
+        "IntegrationMethod": "POST",
+        "PayloadFormatVersion": "2.0"
+      }
+    },
+    "Route": {
+      "Type": "AWS::ApiGatewayV2::Route",
+      "Properties": {
+        "ApiId": {
+          "Ref": "Api"
+        },
+        "RouteKey": "POST /subscribe",
+        "Target": {
+          "Fn::Sub": "integrations/${Integration}"
+        }
+      }
+    },
+    "Stage": {
+      "Type": "AWS::ApiGatewayV2::Stage",
+      "Properties": {
+        "ApiId": {
+          "Ref": "Api"
+        },
+        "StageName": "$default",
+        "AutoDeploy": true
+      }
+    },
+    "Perm": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "Fn"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Sub": "arn:aws:execute-api:us-east-1:326786007037:${Api}/*/*/subscribe"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "ApiEndpoint": {
+      "Value": {
+        "Fn::Sub": "https://${Api}.execute-api.us-east-1.amazonaws.com/subscribe"
+      }
+    },
+    "ApiId": {
+      "Value": {
+        "Ref": "Api"
+      }
+    }
+  }
+}
