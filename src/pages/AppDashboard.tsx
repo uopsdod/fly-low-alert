@@ -1,19 +1,15 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Plane, LogOut } from "lucide-react";
+import { useAuthUser } from "@/components/RequireAuth";
 
-export const Route = createFileRoute("/_authenticated/app")({
-  head: () => ({ meta: [{ title: "Dashboard — Flight Price Notifier" }] }),
-  component: Dashboard,
-});
-
-function Dashboard() {
-  const { user } = Route.useRouteContext();
+export default function AppDashboard() {
+  const user = useAuthUser();
   const navigate = useNavigate();
 
   async function handleSignOut() {
     await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
+    navigate("/sign-in", { replace: true });
   }
 
   return (
@@ -46,15 +42,12 @@ function Dashboard() {
           Hi <span className="text-primary">{user.email}</span>
         </h1>
         <div className="mt-8 max-w-2xl rounded-2xl border border-border bg-card p-8">
-          <p className="text-lg font-semibold">
-            你的航線追蹤儀表板即將上線
-          </p>
+          <p className="text-lg font-semibold">你的航線追蹤儀表板即將上線</p>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
             下一個里程碑會加上訂閱航線的功能。
           </p>
           <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
-            Your dashboard is coming soon. Route-subscription will be added in
-            the next milestone.
+            Your dashboard is coming soon. Route-subscription will be added in the next milestone.
           </p>
         </div>
       </main>

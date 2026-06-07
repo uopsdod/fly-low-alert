@@ -1,19 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { Link } from "react-router-dom";
 import { Plane, BellRing, XCircle } from "lucide-react";
-
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Flight Price Notifier — 機票降價通知" },
-      {
-        name: "description",
-        content:
-          "設定航線與目標價，機票降價就通知你。Set a route and a target price — we email you when the fare drops.",
-      },
-    ],
-  }),
-  component: LandingPage,
-});
 
 const features = [
   {
@@ -36,14 +22,13 @@ const features = [
   },
 ];
 
-function LandingPage() {
+export default function Landing() {
   return (
     <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
       <div
         className="pointer-events-none absolute inset-0 -z-10"
         style={{ background: "var(--gradient-radial)" }}
       />
-
       <header className="container mx-auto flex items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2 font-bold text-lg">
           <span
@@ -55,12 +40,9 @@ function LandingPage() {
           <span>Flight Price Notifier</span>
         </div>
         <Link
-          to="/auth"
+          to="/sign-in"
           className="rounded-lg px-4 py-2 text-sm font-semibold text-primary-foreground transition-transform hover:scale-105"
-          style={{
-            background: "var(--gradient-hero)",
-            boxShadow: "var(--shadow-glow)",
-          }}
+          style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
         >
           Sign in / 登入
         </Link>
@@ -88,12 +70,9 @@ function LandingPage() {
           </p>
           <div className="mt-10 flex justify-center">
             <Link
-              to="/auth"
+              to="/sign-up"
               className="rounded-xl px-8 py-4 text-base font-semibold text-primary-foreground transition-transform hover:scale-105"
-              style={{
-                background: "var(--gradient-hero)",
-                boxShadow: "var(--shadow-glow)",
-              }}
+              style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
             >
               Get started — 立即註冊
             </Link>

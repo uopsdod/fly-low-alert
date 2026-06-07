@@ -1,33 +1,21 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Plane } from "lucide-react";
 import { toast } from "sonner";
-import { Toaster } from "@/components/ui/sonner";
 
-export const Route = createFileRoute("/auth")({
-  head: () => ({
-    meta: [
-      { title: "Sign in — Flight Price Notifier" },
-      { name: "description", content: "Sign in or create your Flight Price Notifier account." },
-    ],
-  }),
-  component: AuthPage,
-});
-
-function AuthPage() {
+export default function AuthForm({ mode }: { mode: "signin" | "signup" }) {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/app", replace: true });
+      if (data.session) navigate("/app", { replace: true });
     });
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" && session) navigate({ to: "/app", replace: true });
+      if (event === "SIGNED_IN" && session) navigate("/app", { replace: true });
     });
     return () => sub.subscription.unsubscribe();
   }, [navigate]);
@@ -55,6 +43,8 @@ function AuthPage() {
     }
   }
 
+  const isSignIn = mode === "signin";
+
   return (
     <div className="min-h-screen bg-background text-foreground relative">
       <div
@@ -76,10 +66,10 @@ function AuthPage() {
       <main className="relative flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 animate-fade-in-up">
           <h1 className="text-2xl font-bold">
-            {mode === "signin" ? "登入 / Sign in" : "註冊 / Sign up"}
+            {isSignIn ? "登入 / Sign in" : "註冊 / Sign up"}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            {mode === "signin"
+            {isSignIn
               ? "歡迎回來，繼續追蹤你的航線。"
               : "建立帳號，開始追蹤台北出發的低價機票。"}
           </p>
@@ -112,30 +102,24 @@ function AuthPage() {
               type="submit"
               disabled={loading}
               className="w-full rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-transform hover:scale-[1.01] disabled:opacity-60"
-              style={{
-                background: "var(--gradient-hero)",
-                boxShadow: "var(--shadow-glow)",
-              }}
+              style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
             >
               {loading
                 ? "Please wait…"
-                : mode === "signin"
+                : isSignIn
                 ? "登入 / Sign in"
                 : "註冊 / Sign up"}
             </button>
           </form>
 
-          <button
-            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-            className="mt-6 w-full text-center text-sm text-muted-foreground hover:text-foreground"
+          <Link
+            to={isSignIn ? "/sign-up" : "/sign-in"}
+            className="mt-6 block w-full text-center text-sm text-muted-foreground hover:text-foreground"
           >
-            {mode === "signin"
-              ? "還沒有帳號？ Sign up"
-              : "已經有帳號？ Sign in"}
-          </button>
+            {isSignIn ? "還沒有帳號？ Sign up" : "已經有帳號？ Sign in"}
+          </Link>
         </div>
       </main>
-      <Toaster />
     </div>
   );
 }
