@@ -68,7 +68,8 @@ export default function AppDashboard() {
     navigate("/sign-in", { replace: true });
   }
 
-  // New / unpaid -> ECPay form (HTML, we redirect); active -> JSON target update.
+  // New / unpaid -> ECPay form (HTML, redirect). Active OR cancelled-in-grace ->
+  // JSON, the row's target price is updated in place (no re-payment).
   async function subscribe(plan_name: string) {
     const raw = prices[plan_name];
     const target_price = Number(raw);
@@ -98,7 +99,10 @@ export default function AppDashboard() {
         ...s,
         [plan_name]: {
           ...(s[plan_name] ?? { plan_name, route: data.route ?? "" }),
-          subscription_status: "active",
+          subscription_status:
+            data.subscription_status ?? s[plan_name]?.subscription_status ?? "active",
+          current_period_end_date:
+            data.current_period_end_date ?? s[plan_name]?.current_period_end_date,
           target_price,
         } as Subscription,
       }));
@@ -188,7 +192,7 @@ export default function AppDashboard() {
             const isCancelled = status === "cancelled"; // still served until period end
             const isServed = isActive || isCancelled;
             const isPending = Boolean(sub) && !isServed; // pending_payment / expired / legacy
-            const ctaLabel = isActive
+            const ctaLabel = isServed
               ? "更新目標價 / Update"
               : isPending
               ? "完成付款 / Pay & subscribe"
@@ -242,14 +246,12 @@ export default function AppDashboard() {
                     </div>
                     {isCancelled && (
                       <p className="mt-3 text-xs text-sky-500">
-                        已取消自動續訂{sub.current_period_end_date ? `，本期有效至 ${sub.current_period_end_date}` : ""}。到期後自動結束，期間仍會收到降價通知。
+                        已取消自動續訂{sub.current_period_end_date ? `，本期有效至 ${sub.current_period_end_date}` : ""}。到期後自動結束，期間仍會收到降價通知，也可隨時調整目標價。
                       </p>
                     )}
-                    {isActive && (
-                      <label className="mt-4 text-xs font-medium text-muted-foreground">
-                        想調整？輸入新的目標價 / Update target (TWD)
-                      </label>
-                    )}
+                    <label className="mt-4 text-xs font-medium text-muted-foreground">
+                      想調整？輸入新的目標價 / Update target (TWD)
+                    </label>
                   </>
                 ) : (
                   <>
@@ -264,31 +266,27 @@ export default function AppDashboard() {
                   </>
                 )}
 
-                {/* Input + primary CTA: shown for active (update) and not-yet-served (pay/start). Cancelled is read-only. */}
-                {!isCancelled && (
-                  <>
-                    <input
-                      type="number"
-                      min={1}
-                      inputMode="numeric"
-                      value={prices[p.plan_name] ?? ""}
-                      onChange={(e) =>
-                        setPrices((s) => ({ ...s, [p.plan_name]: e.target.value }))
-                      }
-                      placeholder={String(isActive ? sub!.target_price : p.hint)}
-                      className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
-                    />
-                    <button
-                      onClick={() => subscribe(p.plan_name)}
-                      disabled={busy === p.plan_name || loadingSubs}
-                      className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-transform hover:scale-[1.01] disabled:opacity-60"
-                      style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
-                    >
-                      {busy === p.plan_name && <Loader2 className="h-4 w-4 animate-spin" />}
-                      {ctaLabel}
-                    </button>
-                  </>
-                )}
+                <input
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={prices[p.plan_name] ?? ""}
+                  onChange={(e) =>
+                    setPrices((s) => ({ ...s, [p.plan_name]: e.target.value }))
+                  }
+                  placeholder={String(isServed ? sub!.target_price : p.hint)}
+                  className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                />
+
+                <button
+                  onClick={() => subscribe(p.plan_name)}
+                  disabled={busy === p.plan_name || loadingSubs}
+                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-primary-foreground transition-transform hover:scale-[1.01] disabled:opacity-60"
+                  style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
+                >
+                  {busy === p.plan_name && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {ctaLabel}
+                </button>
 
                 {isActive && (
                   <button
