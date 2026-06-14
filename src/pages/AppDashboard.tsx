@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { Plane, LogOut, Loader2, CheckCircle2 } from "lucide-react";
+import { Plane, LogOut, Loader2, CheckCircle2, Clock, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthUser } from "@/components/RequireAuth";
 
@@ -11,6 +11,7 @@ const API_BASE =
   "https://voqomtriai.execute-api.us-east-1.amazonaws.com";
 const SUBSCRIBE_URL = `${API_BASE}/subscribe`;
 const LIST_URL = `${API_BASE}/subscriptions`;
+const CANCEL_URL = `${API_BASE}/cancel`;
 
 // The two fixed plans — must match the Lambda's PLANS map.
 const PLANS = [
@@ -22,6 +23,7 @@ type Subscription = {
   plan_name: string;
   route: string;
   target_price: number;
+  subscription_status?: string; // "active" | "pending_payment" | "expired"
 };
 
 export default function AppDashboard() {
@@ -29,6 +31,7 @@ export default function AppDashboard() {
   const navigate = useNavigate();
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
   // plan_name -> existing subscription (the durable DynamoDB row)
   const [subs, setSubs] = useState<Record<string, Subscription>>({});
   const [loadingSubs, setLoadingSubs] = useState(true);
@@ -52,6 +55,12 @@ export default function AppDashboard() {
 
   useEffect(() => {
     loadSubscriptions();
+    // After returning from ECPay's cashier (OrderResultURL), confirm + refresh.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("purchase") === "success") {
+      toast.success("付款完成！訂閱啟用中，稍候將開始為你追蹤降價。");
+      window.history.replaceState({}, "", "/app");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -60,6 +69,9 @@ export default function AppDashboard() {
     navigate("/sign-in", { replace: true });
   }
 
+  // Click "開始追蹤" (new), "完成付款" (pending/expired), or "更新目標價" (active).
+  // The Lambda decides: a new/unpaid row returns an auto-submit ECPay form (HTML)
+  // and we hand the browser to the cashier; an active row returns JSON (price updated).
   async function subscribe(plan_name: string) {
     const raw = prices[plan_name];
     const target_price = Number(raw);
@@ -74,21 +86,61 @@ export default function AppDashboard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: user.email, plan_name, target_price }),
       });
+      const ct = res.headers.get("content-type") || "";
+
+      // HTML response = the signed ECPay checkout form → redirect to the cashier.
+      if (ct.includes("text/html")) {
+        const html = await res.text();
+        toast.message("前往 ECPay 完成付款…");
+        document.open();
+        document.write(html);
+        document.close();
+        return; // page is being replaced by the ECPay redirect
+      }
+
+      // JSON response = an active subscriber updating their target price.
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
-      // reflect the new durable subscription immediately
       setSubs((s) => ({
         ...s,
-        [plan_name]: data.subscription ?? { plan_name, route: "", target_price },
+        [plan_name]: {
+          ...(s[plan_name] ?? { plan_name, route: data.route ?? "" }),
+          subscription_status: "active",
+          target_price,
+        } as Subscription,
       }));
       setPrices((s) => ({ ...s, [plan_name]: "" }));
       toast.success(
-        `已訂閱 ${plan_name === "tokyo" ? "台北✈東京" : "台北✈首爾"}，目標價 NT$${target_price.toLocaleString()}`,
+        `已更新 ${plan_name === "tokyo" ? "台北✈東京" : "台北✈首爾"} 目標價為 NT$${target_price.toLocaleString()}`,
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "訂閱失敗，請稍後再試");
+      toast.error(err instanceof Error ? err.message : "操作失敗，請稍後再試");
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Click "取消追蹤" → cancel the ECPay recurring contract + stop alerts.
+  async function cancelSub(plan_name: string, route: string) {
+    if (!window.confirm("確定要取消訂閱嗎？將停止扣款並停止降價通知。")) return;
+    setCancelling(plan_name);
+    try {
+      const res = await fetch(CANCEL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email, route }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+      setSubs((s) => ({
+        ...s,
+        [plan_name]: { ...(s[plan_name] as Subscription), subscription_status: "expired" },
+      }));
+      toast.success("已取消訂閱，未來不會再扣款。");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "取消失敗，請稍後再試");
+    } finally {
+      setCancelling(null);
     }
   }
 
@@ -122,20 +174,27 @@ export default function AppDashboard() {
           Hi <span className="text-primary">{user.email}</span>
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          選一條航線，設定你的目標價 (TWD)。當機票降到目標價以下，我們就會通知你。
+          選一條航線，設定你的目標價 (TWD)。訂閱（月費）後，當機票降到目標價以下，我們就會通知你。
           <br />
-          Pick a route and set your target price in TWD — we’ll alert you when the fare drops below it.
+          Pick a route, set your target price in TWD, and subscribe — we’ll alert you when the fare drops below it.
         </p>
 
         <div className="mt-8 grid gap-6 sm:grid-cols-2 max-w-3xl">
           {PLANS.map((p) => {
             const sub = subs[p.plan_name];
-            const subscribed = Boolean(sub);
+            const status = sub?.subscription_status;
+            const isActive = status === "active";
+            const isPending = Boolean(sub) && !isActive; // pending_payment / expired / legacy
+            const ctaLabel = isActive
+              ? "更新目標價 / Update"
+              : isPending
+              ? "完成付款 / Pay & subscribe"
+              : "開始追蹤 / Start tracking";
             return (
               <div
                 key={p.plan_name}
                 className={`rounded-2xl border bg-card p-6 flex flex-col transition-colors ${
-                  subscribed ? "border-primary" : "border-border"
+                  isActive ? "border-primary" : "border-border"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -143,16 +202,28 @@ export default function AppDashboard() {
                     <Plane className="h-5 w-5 text-primary" />
                     <h2 className="text-xl font-bold">{p.title}</h2>
                   </div>
-                  {subscribed && (
+                  {isActive && (
                     <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
                       <CheckCircle2 className="h-3.5 w-3.5" />
-                      已訂閱 / Subscribed
+                      已訂閱 / Active
+                    </span>
+                  )}
+                  {status === "pending_payment" && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-1 text-xs font-semibold text-amber-500">
+                      <Clock className="h-3.5 w-3.5" />
+                      待付款 / Pending
+                    </span>
+                  )}
+                  {status === "expired" && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                      <XCircle className="h-3.5 w-3.5" />
+                      已取消 / Expired
                     </span>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{p.sub}</p>
 
-                {subscribed ? (
+                {isActive ? (
                   <>
                     <div className="mt-5 rounded-lg border border-border bg-input px-3 py-3 text-sm">
                       <span className="text-muted-foreground">目前目標價 / Target</span>
@@ -167,7 +238,9 @@ export default function AppDashboard() {
                 ) : (
                   <>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      目前最低約 NT${p.hint.toLocaleString()}
+                      {isPending
+                        ? "尚未完成付款，輸入目標價並前往付款以啟用。"
+                        : `目前最低約 NT$${p.hint.toLocaleString()}`}
                     </p>
                     <label className="mt-5 text-xs font-medium text-muted-foreground">
                       目標價 / Target price (TWD)
@@ -183,7 +256,7 @@ export default function AppDashboard() {
                   onChange={(e) =>
                     setPrices((s) => ({ ...s, [p.plan_name]: e.target.value }))
                   }
-                  placeholder={String(subscribed ? sub.target_price : p.hint)}
+                  placeholder={String(isActive ? sub!.target_price : p.hint)}
                   className="mt-1 w-full rounded-lg border border-border bg-input px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                 />
 
@@ -194,8 +267,19 @@ export default function AppDashboard() {
                   style={{ background: "var(--gradient-hero)", boxShadow: "var(--shadow-glow)" }}
                 >
                   {busy === p.plan_name && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {subscribed ? "更新目標價 / Update" : "開始追蹤 / Start tracking"}
+                  {ctaLabel}
                 </button>
+
+                {isActive && (
+                  <button
+                    onClick={() => cancelSub(p.plan_name, sub!.route)}
+                    disabled={cancelling === p.plan_name}
+                    className="mt-2 inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-card py-2.5 text-sm font-semibold text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-60"
+                  >
+                    {cancelling === p.plan_name && <Loader2 className="h-4 w-4 animate-spin" />}
+                    取消追蹤 / Cancel
+                  </button>
+                )}
               </div>
             );
           })}
